@@ -1,0 +1,21 @@
+[Unit]
+Description=ai-brain watcher for {{PROJECT_NAME}} ({{PROJECT_ID}})
+Documentation=https://github.com/developerDesinger/ai-brain
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory={{PROJECT_ROOT}}
+ExecStart={{NODE_BIN}} {{BRAIN_CLI}} watch {{PROJECT_ROOT}} --debounce {{DEBOUNCE_MS}} --quiet
+Environment=PATH={{PATH_ENV}}
+Environment=HOME={{HOME_ENV}}
+Environment=AI_BRAIN_HOME={{AI_BRAIN_HOME}}
+Restart=on-failure
+RestartSec=10s
+Nice=5
+IOSchedulingClass=idle
+StandardOutput=append:{{LOG_DIR}}/{{UNIT_NAME}}.out.log
+StandardError=append:{{LOG_DIR}}/{{UNIT_NAME}}.err.log
+
+[Install]
+WantedBy=default.target

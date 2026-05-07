@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{LABEL}}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{NODE_BIN}}</string>
+        <string>{{BRAIN_CLI}}</string>
+        <string>watch</string>
+        <string>{{PROJECT_ROOT}}</string>
+        <string>--debounce</string>
+        <string>{{DEBOUNCE_MS}}</string>
+        <string>--quiet</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{{PROJECT_ROOT}}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{PATH_ENV}}</string>
+        <key>HOME</key>
+        <string>{{HOME_ENV}}</string>
+        <key>AI_BRAIN_HOME</key>
+        <string>{{AI_BRAIN_HOME}}</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>{{LOG_DIR}}/{{LABEL}}.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{LOG_DIR}}/{{LABEL}}.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>Nice</key>
+    <integer>5</integer>
+</dict>
+</plist>

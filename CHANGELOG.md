@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.0 — AST-based extraction + service templates
+
+The code indexer can now use real ASTs instead of regex, and `brain watch` ships
+with launchd / systemd templates so it can run as a managed background service
+that survives reboots.
+
+**Tree-sitter AST extractor (optional, falls back to regex)**
+
+- New `core/src/ast-extract.ts` — lazy-loads tree-sitter and per-language
+  grammars, walks the AST, and returns structurally accurate function /
+  class / interface / type / method names. Supported extensions: `.ts`,
+  `.tsx`, `.js`, `.jsx`, `.py`, `.go`, `.rs`, `.java`, `.rb`, `.cs`.
+- Tree-sitter and grammars are listed under `optionalDependencies`. If they
+  install successfully (requires a C toolchain on most platforms; macOS and
+  most Linux distros are fine), the AST path is used automatically. If any
+  fail to compile, that language quietly falls back to the existing regex
+  pass — `brain refresh` and `brain watch` keep working exactly as before.
+- AST output is **authoritative when it succeeds** — the heuristic / regex
+  pass is skipped for that file. This eliminates false positives from
+  identifiers that appear inside comments, docstrings, or string literals
+  (verified on a fixture: `// function fakeFn() {}` no longer pollutes the
+  index, while `realMethod()` nested inside a class is correctly captured).
+- New `brain doctor` command surfaces tree-sitter / grammar availability
+  per extension so users can see which path is in use.
+
+**`brain service` — managed background watcher**
+
+- `service-templates/launchd.plist.tmpl` (macOS) and
+  `service-templates/systemd.service.tmpl` (Linux) ship in the package and
+  are rendered per project on demand.
+- `brain service render [path]` — print the rendered service file to stdout
+  (no side effects).
+- `brain service install [path] [--load] [--debounce MS]` — write the
+  service file under `~/Library/LaunchAgents/` (macOS) or
+  `~/.config/systemd/user/` (Linux). Default writes the file and prints
+  load instructions; pass `--load` to also bootstrap / enable + start
+  immediately.
+- `brain service status [path]` — best-effort probe via `launchctl print`
+  or `systemctl --user status`.
+- `brain service uninstall [path]` — bootout / disable + remove the file.
+- Service identifiers derive from the project's stable ID, so multiple
+  projects coexist cleanly under the user agent.
+- Logs land in `~/.ai-brain/logs/<label>.{out,err}.log`; the watcher runs
+  with `Nice 5` / `LowPriorityIO` (launchd) or `IOSchedulingClass=idle`
+  (systemd) so it never competes with your editor.
+
 ## 0.3.0 — Continuous auto-learning + MCP migration
 
 The brain now learns from the codebase **continuously and automatically**, without API calls. Plus the MCP layer migrated to the modern `registerTool` API.

@@ -13,7 +13,9 @@ import {
   applyCodeIndexUpsert,
   extractEntities,
   getIndexedCodeFiles,
+  normaliseEntity,
 } from "./storage.js";
+import { extractWithAst } from "./ast-extract.js";
 
 /**
  * Continuous, token-free code indexer. Scans source files, extracts entities
@@ -144,16 +146,37 @@ function hashContent(buf: Buffer): string {
 function extractFromCodeFile(buf: Buffer, ext: string): string[] {
   // Decode as UTF-8; binary noise will yield no entities and be filtered out.
   const text = buf.toString("utf8");
-  const fromHeuristic = extractEntities(text);
 
-  // Add per-language structure: function/class/type names. Wide net; the
-  // entity normaliser will drop stop-words.
-  const out = new Set(fromHeuristic);
-  const add = (s: string) => {
+  const out = new Set<string>();
+  // Inputs from the regex pass go through extractEntities -> already normalised.
+  // Inputs from the AST pass are raw identifiers — normalise them here so they
+  // round-trip through `recallCode`'s normalised query path.
+  const addRaw = (s: string) => {
+    const n = normaliseEntity(s);
+    if (n) out.add(n);
+  };
+  const addNormalised = (s: string) => {
     if (!s) return;
-    if (s.length < 3 || s.length > 64) return;
+    if (s.length < 2 || s.length > 64) return;
     out.add(s);
   };
+
+  // Prefer AST-based extraction when a tree-sitter grammar is available for
+  // this extension. The AST path returns structurally accurate function /
+  // class / type names — strings inside comments and strings won't match,
+  // and decorated / nested declarations are caught. When AST succeeds we
+  // use ONLY AST names (no heuristic pollution from identifiers that
+  // appear in comments / docstrings). When the grammar isn't installed,
+  // fall back to the heuristic + regex pass below.
+  const astNames = extractWithAst(text, ext);
+  if (astNames) {
+    for (const n of astNames) addRaw(n);
+    return [...out].slice(0, 64);
+  }
+
+  // Regex fallback: heuristic entity scan over the raw text plus per-language
+  // declaration patterns. Less precise than AST but works on every extension.
+  for (const e of extractEntities(text)) addNormalised(e);
 
   // TypeScript / JavaScript-style declarations.
   if (
@@ -162,22 +185,24 @@ function extractFromCodeFile(buf: Buffer, ext: string): string[] {
     for (const m of text.matchAll(
       /\b(?:function|class|interface|type|enum|const|let|var)\s+([A-Za-z_$][\w$]*)/g,
     )) {
-      add(m[1]);
+      addRaw(m[1]);
     }
     for (const m of text.matchAll(/\bexport\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g)) {
-      add(m[1]);
+      addRaw(m[1]);
     }
   }
   // Python.
   if ([".py", ".pyi"].includes(ext)) {
-    for (const m of text.matchAll(/\b(?:def|class)\s+([A-Za-z_]\w*)/g)) add(m[1]);
+    for (const m of text.matchAll(/\b(?:def|class)\s+([A-Za-z_]\w*)/g)) {
+      addRaw(m[1]);
+    }
   }
   // Go.
   if (ext === ".go") {
     for (const m of text.matchAll(
       /\b(?:func|type|var|const)\s+([A-Za-z_]\w*)/g,
     )) {
-      add(m[1]);
+      addRaw(m[1]);
     }
   }
   // Rust.
@@ -185,7 +210,7 @@ function extractFromCodeFile(buf: Buffer, ext: string): string[] {
     for (const m of text.matchAll(
       /\b(?:fn|struct|enum|trait|type|mod)\s+([A-Za-z_]\w*)/g,
     )) {
-      add(m[1]);
+      addRaw(m[1]);
     }
   }
   // Java / Kotlin / Scala / Swift / C# share patterns.
@@ -193,7 +218,7 @@ function extractFromCodeFile(buf: Buffer, ext: string): string[] {
     for (const m of text.matchAll(
       /\b(?:class|interface|enum|object|trait|struct|fun|def|func)\s+([A-Za-z_]\w*)/g,
     )) {
-      add(m[1]);
+      addRaw(m[1]);
     }
   }
   // Ruby / Elixir.
@@ -201,7 +226,7 @@ function extractFromCodeFile(buf: Buffer, ext: string): string[] {
     for (const m of text.matchAll(
       /\b(?:class|module|def|defmodule)\s+([A-Za-z_][\w?!]*)/g,
     )) {
-      add(m[1]);
+      addRaw(m[1]);
     }
   }
 

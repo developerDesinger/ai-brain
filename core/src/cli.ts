@@ -32,6 +32,13 @@ import { Effort, runSubagent } from "./runner.js";
 import { LearnSource, learn } from "./learn.js";
 import { refreshCodeIndex, watchProject } from "./code-index.js";
 import { getCodeIndexStats, recallCode } from "./storage.js";
+import {
+  install as serviceInstall,
+  render as serviceRender,
+  status as serviceStatus,
+  uninstall as serviceUninstall,
+} from "./service.js";
+import { astStatus } from "./ast-extract.js";
 
 type Args = { _: string[]; flags: Record<string, string | boolean> };
 
@@ -95,11 +102,16 @@ Usage:
   brain code <query...> [--path P] [--limit N]
                                        search the code-entity index for files where any of the query
                                        tokens appear as identifiers (token-free).
+  brain service <install|uninstall|status|render> [path] [--load] [--debounce MS]
+                                       generate a launchd (macOS) or systemd (Linux) user service
+                                       that runs 'brain watch' continuously and survives reboots.
+                                       'install' writes the file; pass --load to also load + start it.
   brain agents [--path P] [--global-only]
                                        list installed sub-agents (global + project-specific)
   brain run <subagent> [input...] [--path P] [--model M] [--effort E] [--max-tokens N] [--max-iter N] [--quiet]
                                        run a sub-agent directly via Anthropic API
   brain status                         engine + data paths + counts
+  brain doctor                         show tree-sitter / grammar availability + extractor status
   brain version                        print version
 
 Entry types: requirement, style, pattern, decision, snippet, glossary, note
@@ -601,6 +613,74 @@ const cmds: Record<string, (args: Args) => void | Promise<void>> = {
     }
   },
 
+  service: (args) => {
+    const sub = args._[1];
+    if (!sub) {
+      throw new Error(
+        "Usage: brain service <install|uninstall|status|render> [path] [--load] [--debounce MS]",
+      );
+    }
+    const project = resolveProject(args._[2]);
+    const debounceMs = Number(flagStr(args, "debounce") ?? 1000);
+
+    if (sub === "render") {
+      const { layout, content } = serviceRender(project, { debounceMs });
+      process.stderr.write(
+        `# would write ${layout.platform} service to ${layout.serviceFile}\n# logs → ${layout.logDir}\n\n`,
+      );
+      process.stdout.write(content);
+      return;
+    }
+
+    if (sub === "install") {
+      const load = flagBool(args, "load");
+      const r = serviceInstall(project, { debounceMs, load });
+      console.log(
+        `Wrote ${r.layout.platform} service: ${r.layout.serviceFile}`,
+      );
+      console.log(`Logs:  ${r.layout.logDir}/`);
+      if (r.loaded) {
+        console.log(
+          r.layout.platform === "launchd"
+            ? `Loaded via launchctl (label ${r.layout.label}). It will run now and at every login.`
+            : `Enabled and started ${r.layout.unitName}. It will run now and at every login.`,
+        );
+      } else {
+        console.log("\nNot loaded yet. Re-run with --load to start it now, or run:");
+        for (const h of r.hints) console.log(`  ${h}`);
+      }
+      return;
+    }
+
+    if (sub === "uninstall") {
+      const r = serviceUninstall(project);
+      console.log(
+        `${r.unloaded ? "Unloaded" : "Was not loaded"}, ${r.removedFile ? "removed" : "no"} service file at ${r.layout.serviceFile}`,
+      );
+      return;
+    }
+
+    if (sub === "status") {
+      const r = serviceStatus(project);
+      console.log(`Project:    ${project.name} (${project.id})`);
+      console.log(`Platform:   ${r.layout.platform}`);
+      console.log(`File:       ${r.layout.serviceFile} (${r.fileExists ? "present" : "missing"})`);
+      if (r.layout.label) console.log(`Label:      ${r.layout.label}`);
+      if (r.layout.unitName) console.log(`Unit:       ${r.layout.unitName}`);
+      console.log(`Logs:       ${r.layout.logDir}/`);
+      console.log(`State:      ${r.status}`);
+      if (r.raw && !flagBool(args, "quiet")) {
+        console.log("\n----- raw -----");
+        console.log(r.raw.trim());
+      }
+      return;
+    }
+
+    throw new Error(
+      `Unknown service subcommand: ${sub}. Use install, uninstall, status, or render.`,
+    );
+  },
+
   status: () => {
     console.log(`Engine home:      ${ENGINE_HOME}`);
     console.log(`Data home:        ${DATA_HOME}`);
@@ -608,6 +688,31 @@ const cmds: Record<string, (args: Args) => void | Promise<void>> = {
     console.log(`MCP launch cmd:   node ${ENGINE_HOME}/core/dist/mcp.js`);
     console.log(`Projects:         ${listProjects().length}`);
     console.log(`Sub-agents:       ${listSubagents().length}`);
+  },
+
+  doctor: () => {
+    const ast = astStatus();
+    console.log(`# brain doctor`);
+    console.log(`engine:           ${ENGINE_HOME}`);
+    console.log(`data:             ${DATA_HOME}`);
+    console.log(`node:             ${process.version} (${process.platform}/${process.arch})`);
+    console.log("");
+    console.log(`tree-sitter:      ${ast.parserAvailable ? "available" : "NOT AVAILABLE — using regex extractor only"}`);
+    if (!ast.parserAvailable && ast.parserError) {
+      console.log(`  reason:         ${ast.parserError}`);
+    }
+    console.log("");
+    console.log("AST grammars (optional dependencies):");
+    for (const g of ast.grammars) {
+      const flag = g.available ? "✓" : "·";
+      console.log(`  ${flag}  ${g.ext.padEnd(6)} ${g.pkg}`);
+    }
+    if (!ast.grammars.some((g) => g.available)) {
+      console.log("");
+      console.log("No grammars loaded — install them to upgrade extraction quality:");
+      console.log("  npm i -g tree-sitter tree-sitter-typescript tree-sitter-python tree-sitter-go tree-sitter-rust tree-sitter-java tree-sitter-ruby tree-sitter-c-sharp");
+      console.log("(or `npm i` inside the cloned engine — they're listed under optionalDependencies)");
+    }
   },
 
   version: () => {

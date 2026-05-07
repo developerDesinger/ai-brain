@@ -53,8 +53,9 @@ brain watch /path/to/project --debounce 500 --quiet
 ```
 
 What it indexes:
-- Function/class/type/interface names extracted with language-aware regex (TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Scala, Swift, C#, Ruby, Elixir).
-- Identifiers caught by the conservative entity heuristic (backticked names, ALL_CAPS, PascalCase, camelCase ≥ 4 chars, multi-word TitleCase phrases).
+- **Tree-sitter AST extraction (v0.4)** when grammars are installed — function / class / type / interface / method names pulled from the actual syntax tree. No false positives from comments or strings, and nested declarations (methods inside classes, decorated functions) are caught. Supported: TypeScript, JavaScript, Python, Go, Rust, Java, Ruby, C#. Run `brain doctor` to see which grammars loaded on your machine.
+- **Regex fallback** for any extension where the AST grammar isn't available — language-aware patterns for TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Scala, Swift, C#, Ruby, Elixir.
+- Identifiers caught by the conservative entity heuristic (backticked names, ALL_CAPS, PascalCase, camelCase ≥ 4 chars, multi-word TitleCase phrases) — only when AST is unavailable for the file.
 - Skips: `node_modules/`, `.git/`, `dist/`, `build/`, `target/`, `venv/`, generated artefacts, files > 256KB.
 
 What it produces (querying does **not** call the LLM):
@@ -66,6 +67,19 @@ brain entity AuthService                       # full entity card: definition + 
 Inside any MCP-aware AI agent, the same data is available via `brain_code_search` and the extended `brain_entity` tool — every entity card now lists "Found in N source files".
 
 For one-shot scans (no continuous watch): `brain refresh [path]`.
+
+### Run it as a managed background service (v0.4)
+
+`brain service` generates a launchd (macOS) or systemd (Linux) user service so `brain watch` survives reboots and runs without a terminal.
+
+```bash
+brain service install                       # write the service file (no load)
+brain service install --load                # write + bootstrap + start now
+brain service status                        # check it
+brain service uninstall                     # stop + remove
+```
+
+Logs land in `~/.ai-brain/logs/`. The watcher runs nice'd with low-priority I/O so it never competes with your editor. Multiple projects each get their own service identifier (derived from the project's stable ID), so they coexist cleanly.
 
 ## The companion workflow: `brain learn`
 
@@ -238,10 +252,13 @@ brain remember --title T --body B [--type X] [--tags a,b] [--scope project|globa
 brain forget <id>                                   remove a KB entry
 brain rebuild [--refresh-entities]                  rebuild FTS5 index; --refresh-entities re-extracts
                                                     entities + summaries on disk
+brain service <install|uninstall|status|render> [path] [--load] [--debounce MS]
+                                                    launchd/systemd templates for `brain watch`
 brain agents [--path P] [--global-only]            list sub-agents (global + project)
 brain run <subagent> [input...] [--path P] [--model M] [--effort E]
                                                     run a sub-agent directly via Anthropic API
 brain status                                        engine + data paths + counts
+brain doctor                                        tree-sitter / grammar availability + extractor status
 brain version                                       print version
 ```
 
