@@ -64,3 +64,4 @@ Hard rules:
 - Do NOT write generic "helpful AI" prompts — they must reference this project's KB or rules.
 - Do NOT install if you cannot point to concrete evidence of a recurring need.
 - If the user's `need` is actually a one-off task, say so and run the built-in sub-agent that fits, instead of installing a new one.
+- The new sub-agent's prompt **must instruct itself to populate `summary` and `entities`** when it calls `brain_remember`. Sub-agents that don't do this poison the knowledge graph with body-only entries that future recall must read in full.

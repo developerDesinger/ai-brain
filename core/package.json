@@ -1,6 +1,6 @@
 {
   "name": "ai-brain",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A project-local AI knowledge brain that learns from your codebase and binds every coding agent (Claude Code, Cursor, Codex CLI, Kiro, Copilot, Windsurf, Aider) to follow it.",
   "type": "module",
   "private": true,

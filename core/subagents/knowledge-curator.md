@@ -47,5 +47,6 @@ Output format (markdown):
 
 After producing the report:
 - Do NOT auto-delete anything. The human must approve.
-- For approved MERGE / SUPERSEDE / TIGHTEN actions, call `brain_remember` with the new content and then `brain_forget` on the obsoleted IDs.
+- For approved MERGE / SUPERSEDE / TIGHTEN actions, call `brain_remember` with the new content (always include `summary` and `entities` — the curator should NEVER produce entries without graph metadata) and then `brain_forget` on the obsoleted IDs.
+- Use `brain_entity(name)` to audit the graph: an entity referenced by 8+ entries that disagree on something is a strong signal for `ASK_HUMAN`.
 - For CAPTURE_NEW items, you may proactively run `style-learner` or `requirement-refiner` if the topic clearly fits.

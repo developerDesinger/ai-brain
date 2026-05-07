@@ -16,11 +16,15 @@ function readVersion(): string {
 const VERSION = readVersion();
 import { listProjects, registerProject, resolveProject } from "./projects.js";
 import {
+  EntryType,
+  forget as forgetStore,
+  getEntity as getEntityStore,
+  getEntries as getEntriesStore,
   listEntries,
   recall as recallStore,
+  recallCompact as recallCompactStore,
   rebuildIndex,
   remember as rememberStore,
-  forget as forgetStore,
 } from "./storage.js";
 import { listSubagents } from "./subagents.js";
 import { syncBridges } from "./sync.js";
@@ -65,14 +69,21 @@ Usage:
   brain list                           list all known projects
   brain show [path]                    print all KB entries for a project
   brain export [path]                  dump entire KB as a single markdown blob (for tools without MCP)
-  brain recall <query...> [--path P] [--limit N] [--no-global]
-                                       search the KB
+  brain recall <query...> [--path P] [--limit N] [--no-global] [--full] [--types t1,t2]
+                                       search the KB (defaults to compact mode — summaries only;
+                                       --full returns body excerpts at ~5x token cost)
+  brain entries <id1> [id2 …] [--path P]
+                                       fetch the full body of specific entries by ID
+  brain entity <name> [--path P] [--limit N] [--no-global]
+                                       look up a knowledge-graph entity (definition + references + neighbors)
   brain remember --title T --body B [--type X] [--tags a,b] [--scope project|global] [--path P]
                                        add a KB entry manually
   brain forget <id> [--path P] [--scope project|global]
                                        remove a KB entry
-  brain rebuild [--path P] [--scope project|global]
+  brain rebuild [--path P] [--scope project|global] [--refresh-entities]
                                        rebuild the FTS index from markdown
+                                       (--refresh-entities also re-runs heuristic entity + summary
+                                       extraction and writes results back to the markdown frontmatter)
   brain agents [--path P] [--global-only]
                                        list installed sub-agents (global + project-specific)
   brain run <subagent> [input...] [--path P] [--model M] [--effort E] [--max-tokens N] [--max-iter N] [--quiet]
@@ -209,18 +220,88 @@ const cmds: Record<string, (args: Args) => void | Promise<void>> = {
 
   recall: (args) => {
     const query = args._.slice(1).join(" ");
-    if (!query) throw new Error("Usage: brain recall <query...>");
+    if (!query) throw new Error("Usage: brain recall <query...> [--full] [--types t1,t2] [--limit N] [--path P] [--no-global]");
     const project = resolveProject(flagStr(args, "path"));
     const limit = Number(flagStr(args, "limit") ?? 8);
     const includeGlobal = !flagBool(args, "no-global");
-    const hits = recallStore({ projectRoot: project.root, query, limit, includeGlobal });
-    if (!hits.length) {
-      console.log("(no matches)");
+    const full = flagBool(args, "full");
+    const typesStr = flagStr(args, "types");
+    const types = typesStr
+      ? (typesStr.split(",").map((t) => t.trim()).filter(Boolean) as EntryType[])
+      : undefined;
+
+    if (full) {
+      const hits = recallStore({
+        projectRoot: project.root,
+        query,
+        limit,
+        includeGlobal,
+        types,
+      });
+      if (!hits.length) return console.log("(no matches)");
+      for (const h of hits) {
+        console.log(`\n[${h.type}${h.scope === "global" ? " · global" : ""}] ${h.title}  (${h.id})`);
+        console.log(`  ${h.excerpt.replace(/\n/g, "\n  ")}`);
+      }
       return;
     }
+
+    const hits = recallCompactStore({
+      projectRoot: project.root,
+      query,
+      limit,
+      includeGlobal,
+      types,
+    });
+    if (!hits.length) return console.log("(no matches)");
     for (const h of hits) {
-      console.log(`\n[${h.type}${h.scope === "global" ? " · global" : ""}] ${h.title}  (${h.id})`);
-      console.log(`  ${h.excerpt.replace(/\n/g, "\n  ")}`);
+      const meta = `${h.type}${h.scope === "global" ? " · global" : ""}`;
+      console.log(`\n[${meta}] ${h.title}  (${h.id})`);
+      if (h.entities.length) console.log(`  entities: ${h.entities.join(", ")}`);
+      if (h.summary) console.log(`  ${h.summary.replace(/\n/g, " ")}`);
+    }
+    console.log(`\n# (compact mode — pass --full for body excerpts; ${hits.length} hits)`);
+  },
+
+  entries: (args) => {
+    const ids = args._.slice(1);
+    if (!ids.length) throw new Error("Usage: brain entries <id1> [id2 …] [--path P]");
+    const project = resolveProject(flagStr(args, "path"));
+    const fetched = getEntriesStore(project.root, ids);
+    if (!fetched.length) return console.log("(no matching entries)");
+    for (const e of fetched) {
+      console.log(`\n## ${e.title}  [${e.type}]`);
+      console.log(`id: ${e.id}`);
+      if (e.tags.length) console.log(`tags: ${e.tags.join(", ")}`);
+      if (e.entities.length) console.log(`entities: ${e.entities.join(", ")}`);
+      console.log(`\n${e.body}\n`);
+    }
+  },
+
+  entity: (args) => {
+    const name = args._.slice(1).join(" ").trim();
+    if (!name) throw new Error("Usage: brain entity <name> [--path P] [--limit N] [--no-global]");
+    const project = resolveProject(flagStr(args, "path"));
+    const limit = Number(flagStr(args, "limit") ?? 12);
+    const includeGlobal = !flagBool(args, "no-global");
+    const card = getEntityStore(project.root, name, { limit, includeGlobal });
+    console.log(`# Entity: ${card.name}`);
+    if (card.definition) {
+      console.log(`\n## Definition  (${card.definition.id})`);
+      console.log(card.definition.body);
+    } else {
+      console.log("\n## Definition\n(no glossary entry — define with `brain remember --type glossary`)");
+    }
+    console.log(`\n## Referenced by (${card.references.length})`);
+    if (!card.references.length) console.log("(none)");
+    for (const r of card.references) {
+      const meta = `${r.type}${r.scope === "global" ? " · global" : ""}`;
+      console.log(`- [${meta}] ${r.title}  (${r.id})`);
+      if (r.summary) console.log(`    ${r.summary.replace(/\n/g, " ").slice(0, 200)}`);
+    }
+    if (card.neighbors.length) {
+      console.log(`\n## Co-occurring entities`);
+      for (const n of card.neighbors) console.log(`- ${n.entity} (×${n.weight})`);
     }
   },
 
@@ -256,8 +337,11 @@ const cmds: Record<string, (args: Args) => void | Promise<void>> = {
   rebuild: (args) => {
     const scope = (flagStr(args, "scope") ?? "project") as "project" | "global";
     const projectRoot = scope === "global" ? null : resolveProject(flagStr(args, "path")).root;
-    const n = rebuildIndex(projectRoot);
-    console.log(`Rebuilt ${scope} index — ${n} entries.`);
+    const refreshEntities = flagBool(args, "refresh-entities");
+    const n = rebuildIndex(projectRoot, { refreshEntities });
+    console.log(
+      `Rebuilt ${scope} index — ${n} entries${refreshEntities ? " (entities + summaries refreshed)" : ""}.`,
+    );
   },
 
   agents: (args) => {

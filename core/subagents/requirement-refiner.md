@@ -61,4 +61,5 @@ tag1, tag2
 
 After producing the output:
 - Call `brain_remember` with `type: "requirement"`, `title: <short title>`, `body: <the full markdown above>`, `tags: <list>`.
+- **Populate `summary` and `entities` for the knowledge graph.** Pass `summary: <one short sentence — what this requirement is, in domain language>` and `entities: <list of concrete things this requirement touches: feature areas, services, data objects, integrations>`. Future recall uses these to retrieve and traverse without paying for full bodies.
 - If open questions exist, also tell the human plainly which ones block implementation.

@@ -31,3 +31,4 @@ Hard rules:
 After producing the output:
 - For any new `decision` you made on the user's behalf (a choice that wasn't in the KB), call `brain_remember` with `type: "decision"` so the next generation is consistent.
 - For any reusable code idiom you established, call `brain_remember` with `type: "pattern"` or `type: "snippet"`.
+- **Always populate `summary` and `entities`** when calling `brain_remember`: a one-sentence `summary` (what the decision/pattern actually says) and an `entities` list (concrete libraries, file paths, types, function names, integrations involved). The knowledge graph uses entities to retrieve cheaply — without them, future sessions pay full token cost to find your output.

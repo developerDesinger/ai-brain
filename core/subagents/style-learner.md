@@ -70,4 +70,5 @@ Output format (markdown):
 
 After producing the output:
 - Call `brain_remember` with `type: "style"`, `title: "Style guide — <area>"`, `body: <markdown>`, `tags: ["style", ...]`. If you covered the whole project in one pass, use one entry. If you focused on one area (e.g. tests, frontend), title accordingly.
+- **Populate `summary` and `entities` for the knowledge graph.** Pass `summary: <one short sentence stating the area's most distinctive style choice>` and `entities: <list of concrete things: language version, key libraries, frameworks, file/folder names, naming conventions, pattern names>`. These power the cheap recall path future sessions will use.
 - For each **inconsistency**, call `brain_remember` with `type: "decision"`, `title: "Decision needed: <topic>"` so the human sees it next session.

@@ -3,12 +3,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
+  CompactHit,
   Entry,
+  EntryType,
   RecallHit,
+  getEntity as getEntityStore,
+  getEntries as getEntriesStore,
   listEntries,
   recall as recallStore,
-  remember as rememberStore,
+  recallCompact as recallCompactStore,
   rebuildIndex,
+  remember as rememberStore,
 } from "./storage.js";
 import { listProjects, resolveProject } from "./projects.js";
 import { getSubagent, listSubagents } from "./subagents.js";
@@ -33,6 +38,20 @@ function formatHits(hits: RecallHit[]): string {
     .join("\n\n---\n\n");
 }
 
+function formatCompact(hits: CompactHit[]): string {
+  if (!hits.length) {
+    return "No matches in the brain. Consider remembering new facts as you learn them.";
+  }
+  return hits
+    .map((h, i) => {
+      const meta = [h.type, h.scope === "global" ? "global" : ""].filter(Boolean).join(" · ");
+      const ents = h.entities.length ? `\n  entities: ${h.entities.join(", ")}` : "";
+      const tagsLine = h.tags.length ? `\n  tags: ${h.tags.join(", ")}` : "";
+      return `${i + 1}. **${h.title}**  [${meta}]\n  id: \`${h.id}\`${tagsLine}${ents}\n  ${h.summary || "(no summary)"}`;
+    })
+    .join("\n\n");
+}
+
 function formatEntries(entries: Entry[], heading: string): string {
   if (!entries.length) return `${heading}\n(no entries yet)`;
   const grouped = new Map<string, Entry[]>();
@@ -55,33 +74,117 @@ function formatEntries(entries: Entry[], heading: string): string {
 
 server.tool(
   "brain_recall",
-  "Search the AI brain for knowledge relevant to a query, scoped to the current project plus global knowledge. Use this BEFORE generating code or answering project-specific questions.",
+  "Search the AI brain for knowledge relevant to a query. **DEFAULTS TO COMPACT MODE** — returns id + title + type + tags + entities + a 1-2 sentence summary per hit. Use compact recall first (it is ~5x cheaper in tokens than full mode); follow up with brain_get_entries(ids) only if you need a specific entry's full body. Pass mode=\"full\" only when you genuinely need body excerpts.",
   {
-    query: z.string().describe("Natural language search; the brain uses keyword search over the KB."),
+    query: z.string().describe("Natural language search; the brain uses keyword search over the KB plus an entity index."),
     projectPath: z
       .string()
       .optional()
-      .describe("Absolute path to the project. Defaults to current working directory."),
+      .describe("Absolute path to the project. Auto-discovered by walking up from cwd if omitted."),
     limit: z.number().int().min(1).max(20).optional().default(8),
     includeGlobal: z.boolean().optional().default(true),
+    mode: z.enum(["compact", "full"]).optional().default("compact").describe("compact (default) returns summaries only; full returns body excerpts at ~5x the token cost."),
+    types: z
+      .array(z.enum(["requirement", "style", "pattern", "decision", "snippet", "glossary", "note"]))
+      .optional()
+      .describe("Narrow to specific entry types before searching."),
   },
-  async ({ query, projectPath, limit, includeGlobal }) => {
+  async ({ query, projectPath, limit, includeGlobal, mode, types }) => {
     const project = resolveProject(projectPath);
-    const hits = recallStore({
+    if (mode === "full") {
+      const hits = recallStore({
+        projectRoot: project.root,
+        query,
+        limit,
+        includeGlobal,
+        types: types as EntryType[] | undefined,
+      });
+      return text(
+        `# Brain recall (full) — ${project.name} (${project.id})\nquery: ${query}\n\n${formatHits(hits)}`,
+      );
+    }
+    const hits = recallCompactStore({
       projectRoot: project.root,
       query,
       limit,
       includeGlobal,
+      types: types as EntryType[] | undefined,
     });
     return text(
-      `# Brain recall — project: ${project.name} (${project.id})\nquery: ${query}\n\n${formatHits(hits)}`,
+      `# Brain recall (compact) — ${project.name} (${project.id})\nquery: ${query}\n\n${formatCompact(hits)}\n\n_Need a full body? Call brain_get_entries with the ids above._`,
     );
   },
 );
 
 server.tool(
+  "brain_get_entries",
+  "Fetch the full body of one or more knowledge entries by ID. Use after brain_recall when you have decided which specific entries you need to read in full.",
+  {
+    ids: z.array(z.string()).min(1).max(20).describe("Entry IDs returned by brain_recall."),
+    projectPath: z.string().optional(),
+  },
+  async ({ ids, projectPath }) => {
+    const project = resolveProject(projectPath);
+    const entries = getEntriesStore(project.root, ids);
+    if (!entries.length) {
+      return text(`No entries found for ids: ${ids.join(", ")}`);
+    }
+    const formatted = entries
+      .map(
+        (e) =>
+          `## ${e.title}  [${e.type}]\n` +
+          `id: \`${e.id}\`\n` +
+          (e.tags.length ? `tags: ${e.tags.join(", ")}\n` : "") +
+          (e.entities.length ? `entities: ${e.entities.join(", ")}\n` : "") +
+          `\n${e.body}`,
+      )
+      .join("\n\n---\n\n");
+    return text(`# Brain entries — ${project.name}\n\n${formatted}`);
+  },
+);
+
+server.tool(
+  "brain_entity",
+  "Look up a knowledge-graph entity (a concept, library, file, or term referenced by knowledge entries). Returns its glossary definition (if any), compact summaries of all entries that mention it, and a 1-hop neighborhood of co-occurring entities. Cheaper than brain_recall when you already know the term you care about.",
+  {
+    name: z.string().describe("Entity name (case/whitespace insensitive). Examples: 'JWT', 'auth', 'rate-limit'."),
+    projectPath: z.string().optional(),
+    limit: z.number().int().min(1).max(30).optional().default(12),
+    includeGlobal: z.boolean().optional().default(true),
+  },
+  async ({ name, projectPath, limit, includeGlobal }) => {
+    const project = resolveProject(projectPath);
+    const card = getEntityStore(project.root, name, { limit, includeGlobal });
+    const lines: string[] = [`# Entity: ${card.name}`, `Project: ${project.name}`, ""];
+    if (card.definition) {
+      lines.push(`## Definition (glossary entry \`${card.definition.id}\`)`);
+      lines.push(card.definition.body);
+      lines.push("");
+    } else {
+      lines.push("## Definition");
+      lines.push(
+        `(no glossary entry — define this term with brain_remember type=glossary if useful)`,
+      );
+      lines.push("");
+    }
+    lines.push(`## Referenced by (${card.references.length} entries)`);
+    if (card.references.length) {
+      lines.push(formatCompact(card.references));
+    } else {
+      lines.push("(no entries reference this entity yet)");
+    }
+    lines.push("");
+    if (card.neighbors.length) {
+      lines.push("## Co-occurring entities (1-hop neighborhood)");
+      lines.push(card.neighbors.map((n) => `- ${n.entity} (×${n.weight})`).join("\n"));
+    }
+    return text(lines.join("\n"));
+  },
+);
+
+server.tool(
   "brain_remember",
-  "Persist a new fact, requirement, style rule, decision, or pattern into the project's knowledge base. Use whenever you learn something durable about the user, project, or codebase.",
+  "Persist a new fact, requirement, style rule, decision, pattern, snippet, glossary entry, or note into the project's knowledge base. **Always include `summary` and `entities`** — they power the knowledge graph and the cheap (compact) recall path. Use whenever you learn something durable about the user, project, or codebase.",
   {
     title: z.string().min(3),
     body: z.string().min(3),
@@ -89,14 +192,34 @@ server.tool(
       .enum(["requirement", "style", "pattern", "decision", "snippet", "glossary", "note"])
       .default("note"),
     tags: z.array(z.string()).optional().default([]),
+    summary: z
+      .string()
+      .optional()
+      .describe(
+        "1-2 sentence summary surfaced by compact recall. Strongly recommended; auto-derived from body if absent.",
+      ),
+    entities: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Concrete things this entry concerns (libraries, services, files, function names, concepts). Powers the knowledge graph; merged with heuristic extraction.",
+      ),
     projectPath: z.string().optional(),
     scope: z.enum(["project", "global"]).optional().default("project"),
   },
-  async ({ title, body, type, tags, projectPath, scope }) => {
+  async ({ title, body, type, tags, summary, entities, projectPath, scope }) => {
     const projectRoot = scope === "global" ? null : resolveProject(projectPath).root;
-    const entry = rememberStore({ projectRoot, title, body, type, tags });
+    const entry = rememberStore({
+      projectRoot,
+      title,
+      body,
+      type,
+      tags,
+      summary,
+      entities,
+    });
     return text(
-      `Saved ${entry.scope} entry **${entry.title}** (id: \`${entry.id}\`, type: ${entry.type}).`,
+      `Saved ${entry.scope} entry **${entry.title}** (id: \`${entry.id}\`, type: ${entry.type}, entities: ${entry.entities.join(", ") || "(none)"}).`,
     );
   },
 );

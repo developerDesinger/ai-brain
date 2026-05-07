@@ -1,10 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
+  CompactHit,
   Entry,
   EntryType,
-  RecallHit,
+  getEntity as getEntityStore,
+  getEntries as getEntriesStore,
   listEntries,
-  recall as recallStore,
+  recallCompact as recallCompactStore,
   remember as rememberStore,
 } from "./storage.js";
 import { ProjectRecord, resolveProject } from "./projects.js";
@@ -48,7 +50,7 @@ const TOOL_DEFS: Anthropic.Tool[] = [
   {
     name: "brain_remember",
     description:
-      "Persist a durable fact into the current project's knowledge base. Call this whenever you uncover something the next session should remember: a refined requirement, a style rule the project follows, an architectural decision, a reusable pattern or snippet, a glossary term. Do NOT use it for ephemeral state, scratch notes, or things already obvious from the code.",
+      "Persist a durable fact into the current project's knowledge base. Call this whenever you uncover something the next session should remember: a refined requirement, a style rule the project follows, an architectural decision, a reusable pattern or snippet, a glossary term. **Always include `summary` and `entities`** — they power the knowledge graph and the cheap (compact) recall path. Do NOT use it for ephemeral state, scratch notes, or things already obvious from the code.",
     input_schema: {
       type: "object",
       properties: {
@@ -70,6 +72,17 @@ const TOOL_DEFS: Anthropic.Tool[] = [
           items: { type: "string" },
           description: "Optional tags to aid retrieval.",
         },
+        summary: {
+          type: "string",
+          description:
+            "1-2 sentence summary. Returned by compact recall instead of the body, so future sessions can find this entry without paying for the body's tokens. Required for clean knowledge-graph behavior.",
+        },
+        entities: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Concrete things this entry concerns: libraries, services, files, function names, concepts, terms. The knowledge graph uses these for cheap entity-based retrieval and 1-hop neighborhood queries.",
+        },
       },
       required: ["title", "body", "type"],
     },
@@ -77,14 +90,54 @@ const TOOL_DEFS: Anthropic.Tool[] = [
   {
     name: "brain_recall",
     description:
-      "Search the project's knowledge base for additional context. Use this if the retrieved knowledge in your system prompt is thin and you suspect more is on file under a different query.",
+      "COMPACT search. Returns id + title + type + tags + entities + a 1-2 sentence summary per hit (no body). ~5x cheaper in tokens than reading full entries. Use this whenever you need more KB context than what's in your system prompt; follow up with brain_get_entries(ids) only for specific entries you need to read in full.",
     input_schema: {
       type: "object",
       properties: {
         query: { type: "string", description: "Natural language query." },
         limit: { type: "integer", minimum: 1, maximum: 15 },
+        types: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["requirement", "style", "pattern", "decision", "snippet", "glossary", "note"],
+          },
+          description: "Optional: restrict the search to specific entry types.",
+        },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "brain_get_entries",
+    description:
+      "Fetch the FULL body of one or more KB entries by ID. Use after brain_recall when you have decided which specific entries you need to read in full. Avoid pulling more than 3-4 at a time — pick selectively.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Entry IDs returned by brain_recall.",
+        },
+      },
+      required: ["ids"],
+    },
+  },
+  {
+    name: "brain_entity",
+    description:
+      "Look up a knowledge-graph entity (a concept, library, file, or term referenced by entries). Returns its glossary definition (if any), compact summaries of all entries that mention it, and the 1-hop neighborhood of co-occurring entities. Cheaper than brain_recall when you already know the term.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Entity name (case/whitespace insensitive). Examples: 'JWT', 'auth', 'rate-limit'.",
+        },
+        limit: { type: "integer", minimum: 1, maximum: 30 },
+      },
+      required: ["name"],
     },
   },
   {
@@ -129,16 +182,17 @@ function effortIsValidFor(model: string, effort: Effort): boolean {
   return true;
 }
 
-function formatHits(hits: RecallHit[]): string {
+function formatCompact(hits: CompactHit[]): string {
   if (!hits.length) return "(no relevant entries in the brain yet)";
   return hits
-    .map(
-      (h, i) =>
-        `### ${i + 1}. ${h.title}  [${h.type}${h.scope === "global" ? " · global" : ""}]\n` +
-        `id: ${h.id}\n` +
-        (h.tags.length ? `tags: ${h.tags.join(", ")}\n` : "") +
-        `\n${h.excerpt}`,
-    )
+    .map((h, i) => {
+      const meta = [h.type, h.scope === "global" ? "global" : ""]
+        .filter(Boolean)
+        .join(" · ");
+      const ents = h.entities.length ? `\n  entities: ${h.entities.join(", ")}` : "";
+      const tagsLine = h.tags.length ? `\n  tags: ${h.tags.join(", ")}` : "";
+      return `${i + 1}. **${h.title}**  [${meta}]\n  id: ${h.id}${tagsLine}${ents}\n  ${h.summary || "(no summary)"}`;
+    })
     .join("\n\n");
 }
 
@@ -163,7 +217,7 @@ function formatOutline(entries: Entry[]): string {
 function buildSystemPrompt(args: {
   subagent: Subagent;
   project: ProjectRecord;
-  hits: RecallHit[];
+  hits: CompactHit[];
   entries: Entry[];
 }): string {
   return [
@@ -177,15 +231,19 @@ function buildSystemPrompt(args: {
     `## Sub-agent role`,
     args.subagent.prompt,
     ``,
-    `## Retrieved knowledge`,
-    formatHits(args.hits),
+    `## Retrieved knowledge (compact — summaries only)`,
+    formatCompact(args.hits),
     ``,
     `## Existing project KB outline`,
     formatOutline(args.entries),
     ``,
     `## Tools available to you`,
-    `- **brain_remember(title, body, type, tags?)** — persist a finding so it survives this session. Use only for durable facts.`,
-    `- **brain_recall(query, limit?)** — search the KB if you need more context than what's above.`,
+    `- **brain_recall(query, limit?, types?)** — compact search (summaries only) over the KB.`,
+    `- **brain_get_entries(ids)** — fetch the FULL body of specific entries you need to read carefully. Use sparingly — pick from the ids in compact recall results.`,
+    `- **brain_entity(name, limit?)** — look up a concept/term in the knowledge graph. Returns its definition + everything that references it, much cheaper than scanning the whole KB.`,
+    `- **brain_remember(title, body, type, tags?)** — persist a durable finding. **Always include a 1-2 sentence summary at the top of body — it becomes the entry's compact-recall summary.** Pull out concrete entities (libraries, files, concepts) into the entities tag list when you can — they power the knowledge graph.`,
+    ``,
+    `Iron Law: prefer the cheapest tool that answers your question. Use compact recall first; only fetch full entries when the summary isn't enough. Use brain_entity when you already know the term.`,
     ``,
     `Execute the role faithfully. When in doubt, prefer to ASK rather than fabricate; surface open questions in your output. After producing your output, call brain_remember for any durable facts the role requires you to capture.`,
   ].join("\n");
@@ -204,10 +262,23 @@ function executeTool(
       const tags = Array.isArray(toolInput.tags)
         ? (toolInput.tags as unknown[]).map((t) => String(t))
         : [];
+      const summary =
+        typeof toolInput.summary === "string" ? toolInput.summary : undefined;
+      const entities = Array.isArray(toolInput.entities)
+        ? (toolInput.entities as unknown[]).map((s) => String(s))
+        : undefined;
       if (!title || !body) {
         return { content: "Error: title and body are required.", isError: true };
       }
-      const entry = rememberStore({ projectRoot: ctx.projectRoot, title, body, type, tags });
+      const entry = rememberStore({
+        projectRoot: ctx.projectRoot,
+        title,
+        body,
+        type,
+        tags,
+        summary,
+        entities,
+      });
       ctx.rememberedIds.push(entry.id);
       return {
         content: `Saved entry "${entry.title}" (id: ${entry.id}, type: ${entry.type}).`,
@@ -216,9 +287,61 @@ function executeTool(
     if (toolName === "brain_recall") {
       const query = String(toolInput.query ?? "").trim();
       const limit = Number(toolInput.limit ?? 8);
+      const types = Array.isArray(toolInput.types)
+        ? (toolInput.types as unknown[]).map((t) => String(t) as EntryType)
+        : undefined;
       if (!query) return { content: "Error: query is required.", isError: true };
-      const hits = recallStore({ projectRoot: ctx.projectRoot, query, limit, includeGlobal: true });
-      return { content: formatHits(hits) };
+      const hits = recallCompactStore({
+        projectRoot: ctx.projectRoot,
+        query,
+        limit,
+        includeGlobal: true,
+        types,
+      });
+      return { content: formatCompact(hits) };
+    }
+    if (toolName === "brain_get_entries") {
+      const ids = Array.isArray(toolInput.ids)
+        ? (toolInput.ids as unknown[]).map((s) => String(s))
+        : [];
+      if (!ids.length) return { content: "Error: ids is required.", isError: true };
+      const entries = getEntriesStore(ctx.projectRoot, ids);
+      if (!entries.length) {
+        return { content: `No entries found for ids: ${ids.join(", ")}` };
+      }
+      const formatted = entries
+        .map(
+          (e) =>
+            `## ${e.title}  [${e.type}]\nid: ${e.id}\n` +
+            (e.tags.length ? `tags: ${e.tags.join(", ")}\n` : "") +
+            (e.entities.length ? `entities: ${e.entities.join(", ")}\n` : "") +
+            `\n${e.body}`,
+        )
+        .join("\n\n---\n\n");
+      return { content: formatted };
+    }
+    if (toolName === "brain_entity") {
+      const name = String(toolInput.name ?? "").trim();
+      const limit = Number(toolInput.limit ?? 12);
+      if (!name) return { content: "Error: name is required.", isError: true };
+      const card = getEntityStore(ctx.projectRoot, name, { limit, includeGlobal: true });
+      const lines = [`# Entity: ${card.name}`];
+      if (card.definition) {
+        lines.push(`## Definition (\`${card.definition.id}\`)`);
+        lines.push(card.definition.body);
+      } else {
+        lines.push("## Definition");
+        lines.push("(no glossary entry — define with brain_remember type=glossary if useful)");
+      }
+      lines.push("");
+      lines.push(`## Referenced by (${card.references.length} entries)`);
+      lines.push(card.references.length ? formatCompact(card.references) : "(none)");
+      if (card.neighbors.length) {
+        lines.push("");
+        lines.push("## Co-occurring entities");
+        lines.push(card.neighbors.map((n) => `- ${n.entity} (×${n.weight})`).join("\n"));
+      }
+      return { content: lines.join("\n") };
     }
     if (toolName === "brain_install_subagent") {
       const name = String(toolInput.name ?? "").trim();
@@ -253,7 +376,11 @@ export async function runSubagent(opts: RunOptions): Promise<RunResult> {
   const project = resolveProject(opts.projectPath);
   const subagent = getSubagent(opts.subagentName, project.root);
   if (!subagent) throw new Error(`Unknown sub-agent: ${opts.subagentName}`);
-  const hits = recallStore({ projectRoot: project.root, query: opts.input, limit: 8 });
+  const hits = recallCompactStore({
+    projectRoot: project.root,
+    query: opts.input,
+    limit: 8,
+  });
   const entries = listEntries(project.root);
 
   const apiKey = opts.apiKey || process.env.ANTHROPIC_API_KEY;
