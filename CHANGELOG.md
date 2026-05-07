@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.0 — Continuous auto-learning + MCP migration
+
+The brain now learns from the codebase **continuously and automatically**, without API calls. Plus the MCP layer migrated to the modern `registerTool` API.
+
+**New: token-free code indexer**
+
+- `brain refresh [path]` — one-shot scan: walks source files, extracts entities (function names, classes, identifiers, terms) using language-aware heuristics + the existing entity extractor, stores them in a per-project `code_entities` table. Skips `node_modules/`, `.git/`, `dist/`, build artefacts, etc. Caps files at 256KB. ~13ms for a small project.
+- `brain watch [path] [--debounce MS] [--quiet]` — continuous: full scan on startup, then incremental updates as files change (powered by [chokidar](https://github.com/paulmillr/chokidar) with `awaitWriteFinish` so partial writes don't trigger re-indexing). Debounced (default 1s) to coalesce bursts like `git checkout`. Foreground; Ctrl-C to stop.
+- `brain code <query> [--limit N]` — search the code-entity index. Returns files where any query token appears as an identifier, ranked by hit count. Token-free.
+
+**Knowledge-graph integration**
+
+- `brain entity <name>` and the MCP `brain_entity` tool now include a **"Found in N source files"** section listing every code path where the entity appears. The graph fuses curated KB entries with the auto-indexed code so "what do we know about JWT?" returns both decisions/glossary entries AND the files where JWT logic lives.
+- New MCP tool `brain_code_search` for code-only queries.
+- New MCP tool `brain_refresh_code_index` for triggering a one-shot scan from inside an AI agent session.
+
+**MCP SDK migration**
+
+- All 12 tools migrated from the deprecated `server.tool(name, desc, schema, cb)` to `server.registerTool(name, {description, inputSchema}, cb)`. No behaviour change; clears v0.2's deprecation hints; keeps us aligned with `@modelcontextprotocol/sdk` ≥ 1.29.
+
+**How auto-learning composes**
+
+- `brain watch` keeps the code index fresh — token-free, fast, runs in a separate terminal or as a long-lived process.
+- `brain learn` (manual) still feeds raw client requirements + code into the KB via Anthropic API for rich, structured findings.
+- `brain remember` (manual) still works for explicit decisions / patterns / glossary entries.
+- The two layers are complementary: the watcher knows *where things are*; the KB knows *why they exist and what rules apply*.
+
 ## 0.2.0 — Knowledge graph
 
 Adds a knowledge-graph layer on top of the markdown KB so agents can retrieve

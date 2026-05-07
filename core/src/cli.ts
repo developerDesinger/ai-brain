@@ -30,6 +30,8 @@ import { listSubagents } from "./subagents.js";
 import { syncBridges } from "./sync.js";
 import { Effort, runSubagent } from "./runner.js";
 import { LearnSource, learn } from "./learn.js";
+import { refreshCodeIndex, watchProject } from "./code-index.js";
+import { getCodeIndexStats, recallCode } from "./storage.js";
 
 type Args = { _: string[]; flags: Record<string, string | boolean> };
 
@@ -84,6 +86,15 @@ Usage:
                                        rebuild the FTS index from markdown
                                        (--refresh-entities also re-runs heuristic entity + summary
                                        extraction and writes results back to the markdown frontmatter)
+  brain refresh [path]                 token-free: scan the project's source files and update the
+                                       code-entity index (token-free; no API calls).
+                                       Run after large checkouts/merges so brain_entity sees the new code.
+  brain watch [path] [--debounce MS] [--quiet]
+                                       run brain refresh continuously. Foreground; Ctrl-C to stop.
+                                       Combines with 'brain learn ./src' for periodic LLM-powered learning.
+  brain code <query...> [--path P] [--limit N]
+                                       search the code-entity index for files where any of the query
+                                       tokens appear as identifiers (token-free).
   brain agents [--path P] [--global-only]
                                        list installed sub-agents (global + project-specific)
   brain run <subagent> [input...] [--path P] [--model M] [--effort E] [--max-tokens N] [--max-iter N] [--quiet]
@@ -299,6 +310,14 @@ const cmds: Record<string, (args: Args) => void | Promise<void>> = {
       console.log(`- [${meta}] ${r.title}  (${r.id})`);
       if (r.summary) console.log(`    ${r.summary.replace(/\n/g, " ").slice(0, 200)}`);
     }
+    if (card.codeLocations.length) {
+      console.log(`\n## Found in ${card.codeLocations.length} source files`);
+      for (const p of card.codeLocations) console.log(`- ${p}`);
+    } else {
+      console.log(
+        `\n## Found in source code\n(no matches — run \`brain refresh\` if the project's code index is empty)`,
+      );
+    }
     if (card.neighbors.length) {
       console.log(`\n## Co-occurring entities`);
       for (const n of card.neighbors) console.log(`- ${n.entity} (×${n.weight})`);
@@ -507,6 +526,78 @@ const cmds: Record<string, (args: Args) => void | Promise<void>> = {
           `# (no entries persisted — review the output and add manually with 'brain remember' if needed)\n`,
         );
       }
+    }
+  },
+
+  refresh: (args) => {
+    const project = resolveProject(args._[1]);
+    process.stderr.write(`# scanning ${project.root} …\n`);
+    const t0 = Date.now();
+    const stats = refreshCodeIndex(project.root);
+    const dt = Date.now() - t0;
+    const idx = getCodeIndexStats(project.root);
+    process.stderr.write(
+      `# done in ${dt}ms — files=${idx.files}, entities=${idx.entities} ` +
+        `(added=${stats.added}, updated=${stats.updated}, removed=${stats.removed})\n`,
+    );
+  },
+
+  watch: async (args) => {
+    const project = resolveProject(args._[1]);
+    const debounceMs = Number(flagStr(args, "debounce") ?? 1000);
+    const quiet = flagBool(args, "quiet");
+
+    process.stderr.write(
+      `# brain watch  ${project.root}  (debounce=${debounceMs}ms, Ctrl-C to stop)\n`,
+    );
+
+    const watcher = watchProject(project.root, {
+      debounceMs,
+      onReady: (stats) => {
+        const idx = getCodeIndexStats(project.root);
+        process.stderr.write(
+          `# initial scan: files=${idx.files}, entities=${idx.entities} ` +
+            `(added=${stats.added}, updated=${stats.updated}, removed=${stats.removed})\n`,
+        );
+      },
+      onEvent: (event, rel) => {
+        if (!quiet) process.stderr.write(`  ${event.padEnd(7)} ${rel}\n`);
+      },
+      onBatch: ({ changed, removed, stats }) => {
+        const idx = getCodeIndexStats(project.root);
+        process.stderr.write(
+          `# batch  changed=${changed.length}, removed=${removed.length} → ` +
+            `added=${stats.added}, updated=${stats.updated}, removed=${stats.removed}; ` +
+            `total files=${idx.files}, entities=${idx.entities}\n`,
+        );
+      },
+      onError: (err) => process.stderr.write(`# error: ${err.message}\n`),
+    });
+
+    const stop = async () => {
+      process.stderr.write(`\n# stopping watcher…\n`);
+      await watcher.stop();
+      process.exit(0);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    // Idle until a signal arrives.
+    await new Promise<void>(() => {});
+  },
+
+  code: (args) => {
+    const query = args._.slice(1).join(" ").trim();
+    if (!query) throw new Error("Usage: brain code <query...> [--path P] [--limit N]");
+    const project = resolveProject(flagStr(args, "path"));
+    const limit = Number(flagStr(args, "limit") ?? 12);
+    const hits = recallCode(project.root, query, limit);
+    if (!hits.length) {
+      console.log("(no matches in the code index — run `brain refresh` first if the project hasn't been scanned)");
+      return;
+    }
+    for (const h of hits) {
+      console.log(`- ${h.path}`);
+      console.log(`    matches: ${h.matches.slice(0, 8).join(", ")}${h.matches.length > 8 ? "…" : ""}`);
     }
   },
 

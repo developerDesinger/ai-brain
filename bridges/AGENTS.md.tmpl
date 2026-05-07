@@ -44,9 +44,15 @@ Perform these in order on every non-trivial task ("non-trivial" = anything beyon
 ```
 brain show {{PROJECT_ROOT}}                              # full project KB
 brain recall "<query>" --path {{PROJECT_ROOT}}           # search
+brain entity <name> --path {{PROJECT_ROOT}}              # knowledge-graph entity lookup (KB + code)
+brain code "<query>" --path {{PROJECT_ROOT}}             # code-only search (token-free)
+brain refresh {{PROJECT_ROOT}}                           # re-scan source files into the code index
+brain watch {{PROJECT_ROOT}}                             # continuous auto-indexing (foreground; token-free)
 brain run <subagent> "<input>" --path {{PROJECT_ROOT}}   # run a sub-agent (needs ANTHROPIC_API_KEY)
 brain export {{PROJECT_ROOT}}                            # dump entire KB as markdown
 ```
+
+**Auto-learning from the codebase.** `brain watch` keeps a token-free code-entity index live as files change. Run it once in a separate terminal and `brain_entity` / `brain_code_search` will answer "where does X live?" instantly, without API calls.
 
 Or read directly from disk:
 

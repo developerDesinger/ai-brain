@@ -64,3 +64,13 @@ Whenever you open this project, before doing anything else:
 ## Fallback if MCP is unavailable
 
 The same data lives in `.ai-brain/kb/*.md` (one markdown file per entry) and `.ai-brain/subagents/*.md`. Read those directly. The Iron Law and Five Mandatory Steps still apply.
+
+## Auto-learning from the codebase
+
+`brain watch` keeps the project's code-entity index live as files change. Tell the human to run it once in a separate terminal:
+
+```
+brain watch {{PROJECT_ROOT}}
+```
+
+It is **token-free** — no API calls — and lets `brain_entity(name)` and `brain_code_search(query)` answer "where in the code does X live?" without your having to grep. Combine with manual `brain learn` calls for LLM-powered analysis of requirements docs and code style.

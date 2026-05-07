@@ -11,11 +11,11 @@ The brain lives at `<your-project>/.ai-brain/`. Knowledge entries are markdown f
 
 ## What it does, in one paragraph
 
-Tell `brain learn` about your project — point it at source files, paste in a vague client email, drop a requirements doc — and it analyses the input with the right specialist sub-agent (`style-learner` for code, `requirement-refiner` for prose), then **persists the durable findings as markdown KB entries inside `<project>/.ai-brain/kb/`**. Each entry carries a 1-2 sentence summary plus auto-extracted entities (libraries, files, concepts, terms), populating a lightweight knowledge graph the agent can query instead of always scanning text. Next time any AI coding agent works on that project, it reads the brain first, obeys the rules it finds, and adds new findings of its own. As patterns recur, the meta-agent `skill-forger` authors brand-new project-specific sub-agents into `.ai-brain/subagents/` — the brain literally grows new skills as your project grows.
+Run `brain watch` in your project once and the brain **continuously, automatically, and token-free** indexes every source file into a knowledge-graph of entities (functions, classes, identifiers, terms) — so any AI agent can ask "where does X live?" without grepping or burning tokens. Layered on top of that: `brain learn` takes raw input from you (project code, a client's vague email, a requirements doc) and runs it through the right specialist sub-agent (`style-learner` / `requirement-refiner`), persisting the durable findings as markdown KB entries inside `<project>/.ai-brain/kb/` with auto-extracted entities + 1-2 sentence summaries. Together they form a lightweight knowledge graph the agent can query cheaply. Next time any AI coding agent works on that project, it reads the brain first, obeys the rules it finds, and adds new findings of its own. As patterns recur, the meta-agent `skill-forger` authors brand-new project-specific sub-agents into `.ai-brain/subagents/` — the brain literally grows new skills as your project grows.
 
 ---
 
-## Quickstart (3 commands)
+## Quickstart
 
 ```bash
 # 1. Install the engine (one-time per machine)
@@ -26,18 +26,48 @@ cd ai-brain && ./install.sh
 cd /path/to/your/project
 brain init                           # creates .ai-brain/ + bridge files for every supported AI tool
 
-# 3. Teach it
+# 3a. Token-free auto-learning (recommended; runs forever, no API key needed)
+brain watch                          # leave running in a separate terminal — indexes every code change
+                                     # so brain_entity / brain code can answer "where does X live?"
+
+# 3b. Manual LLM-powered learning (uses Anthropic API)
 export ANTHROPIC_API_KEY=sk-ant-...
 brain learn ./src                                       # learn the project's style from existing code
 brain learn ./client-email.txt                          # learn from a vague requirements doc
 brain learn "Users want filtering by date and team"     # learn from raw text
 ```
 
-That's it. Now every AI coding agent in this project — Claude Code, Cursor, Codex CLI, Kiro, Copilot, Windsurf, Aider — reads from `.ai-brain/` and obeys the contract in `CLAUDE.md` / `AGENTS.md` / etc.
+Step 3a is **continuous and free** — keeps the code-entity index in sync with every save. Step 3b is **manual and paid** — for client requirements, style guides, and decisions you want the brain to reason about. Use both: `brain watch` in the background, `brain learn` whenever you have new client input.
+
+Once running, every AI coding agent in this project — Claude Code, Cursor, Codex CLI, Kiro, Copilot, Windsurf, Aider — reads from `.ai-brain/` and obeys the contract in `CLAUDE.md` / `AGENTS.md` / etc.
 
 ---
 
-## The headline workflow: `brain learn`
+## Continuous auto-learning: `brain watch`
+
+`brain watch` runs in the foreground (or background via `nohup` / `tmux` / a launchd plist) and keeps the project's code-entity index live as files change. **Token-free** — no Anthropic API calls. Backed by [chokidar](https://github.com/paulmillr/chokidar) with `awaitWriteFinish` so partial writes don't trigger re-indexing.
+
+```bash
+brain watch                              # cwd
+brain watch /path/to/project --debounce 500 --quiet
+```
+
+What it indexes:
+- Function/class/type/interface names extracted with language-aware regex (TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, Scala, Swift, C#, Ruby, Elixir).
+- Identifiers caught by the conservative entity heuristic (backticked names, ALL_CAPS, PascalCase, camelCase ≥ 4 chars, multi-word TitleCase phrases).
+- Skips: `node_modules/`, `.git/`, `dist/`, `build/`, `target/`, `venv/`, generated artefacts, files > 256KB.
+
+What it produces (querying does **not** call the LLM):
+```bash
+brain code "validateJwtToken AuthService"      # find files where any token appears
+brain entity AuthService                       # full entity card: definition + KB refs + code locations + neighbors
+```
+
+Inside any MCP-aware AI agent, the same data is available via `brain_code_search` and the extended `brain_entity` tool — every entity card now lists "Found in N source files".
+
+For one-shot scans (no continuous watch): `brain refresh [path]`.
+
+## The companion workflow: `brain learn`
 
 `brain learn` is the entry point for **everything you want the agent to know**.
 
@@ -131,11 +161,13 @@ Project sub-agents take precedence over global ones with the same name, so each 
 
 Inside Claude Code / Cursor / Kiro, the brain is exposed as MCP tools. The host agent runs the LLM; the brain ships prompts + retrieved KB.
 
-- `brain_recall(query, mode?, types?, limit?)` — search project + global KB. Defaults to compact mode (summaries only, bounded cost).
+- `brain_recall(query, mode?, types?, limit?)` — search project + global KB. Defaults to compact (summaries only, bounded cost).
 - `brain_get_entries(ids)` — fetch full body of specific entries by ID after recall.
-- `brain_entity(name)` — knowledge-graph query: definition + references + 1-hop neighbors.
-- `brain_remember(title, body, type, tags?, summary?, entities?)` — persist. Always include `summary` and `entities` for the graph.
-- `brain_project_summary()` — load full project KB outline at session start.
+- `brain_entity(name)` — knowledge-graph query: definition + KB references + **code-file locations** + 1-hop neighbors.
+- `brain_code_search(query)` — token-free code-only search (uses the code-entity index).
+- `brain_refresh_code_index(paths?)` — trigger a one-shot code scan from inside the agent.
+- `brain_remember(title, body, type, tags?, summary?, entities?)` — persist. Always include `summary` and `entities`.
+- `brain_project_summary()` — load full project KB outline + code-index stats.
 - `brain_invoke_subagent(name, input)` — `requirement-refiner` / `style-learner` / `code-generator` / `knowledge-curator` / `skill-forger` + project-grown sub-agents.
 - `brain_list_subagents()`, `brain_list_projects()`, `brain_sync_bridges()`, `brain_rebuild_index()`
 
@@ -189,15 +221,18 @@ brain rebuild --refresh-entities
 ```text
 brain init [path]                                   create .ai-brain/ + write bridges into a project
 brain learn <input> [--type code|requirements|auto] [--path P]
-                                                    learn from code, files, dirs, or raw text
+                                                    LLM-powered: learn from code, files, dirs, or raw text
+brain refresh [path]                                token-free: one-shot scan of source files into the code index
+brain watch [path] [--debounce MS] [--quiet]       token-free: continuous auto-indexing on file changes
+brain code <query...> [--path P] [--limit N]       token-free: search the code-entity index
+brain entity <name> [--path P] [--limit N]         knowledge-graph entity (KB + code locations + neighbors)
+brain entries <id1> [id2 …] [--path P]             fetch full body for specific entries
+brain recall <query...> [--full] [--types t1,t2] [--path P] [--limit N]
+                                                    search KB; defaults to compact (summary only)
 brain sync [path] [--force]                         re-write bridge files into a project
 brain list                                          list known projects
 brain show [path]                                   print all KB entries for a project
 brain export [path]                                 dump entire KB as a single markdown blob
-brain recall <query...> [--path P] [--limit N] [--full] [--types t1,t2]
-                                                    search KB; defaults to compact (summary only)
-brain entries <id1> [id2 …] [--path P]             fetch full body for specific entries
-brain entity <name> [--path P] [--limit N]         look up a knowledge-graph entity
 brain remember --title T --body B [--type X] [--tags a,b] [--scope project|global] [--path P]
                                                     add a KB entry manually
 brain forget <id>                                   remove a KB entry

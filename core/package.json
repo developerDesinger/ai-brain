@@ -1,6 +1,6 @@
 {
   "name": "ai-brain",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A project-local AI knowledge brain that learns from your codebase and binds every coding agent (Claude Code, Cursor, Codex CLI, Kiro, Copilot, Windsurf, Aider) to follow it.",
   "type": "module",
   "private": true,
@@ -54,6 +54,7 @@
     "@anthropic-ai/sdk": "^0.95.0",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "better-sqlite3": "^11.5.0",
+    "chokidar": "^4.0.3",
     "gray-matter": "^4.0.3",
     "zod": "^3.23.8"
   },

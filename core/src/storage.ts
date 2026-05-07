@@ -81,6 +81,16 @@ export interface EntityCard {
   references: CompactHit[];
   /** Entities co-occurring in the same entries (1-hop neighborhood). */
   neighbors: EntityNeighbor[];
+  /** Source-code file paths (project-relative) where this entity appears. */
+  codeLocations: string[];
+}
+
+export interface CodeIndexStats {
+  totalFiles: number;
+  totalEntities: number;
+  added: number;
+  updated: number;
+  removed: number;
 }
 
 const VALID_TYPES: EntryType[] = [
@@ -129,6 +139,25 @@ function openDb(dbPath: string): Database.Database {
       PRIMARY KEY (entry_id, entity)
     );
     CREATE INDEX IF NOT EXISTS idx_entity_refs_entity ON entity_refs(entity);
+  `);
+  // Code-level entity index — populated by `brain refresh` / `brain watch`.
+  // Token-free: we extract entities from source files and remember which file
+  // mentions which entity. Keeps the KB itself uncluttered.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS code_files (
+      path        TEXT PRIMARY KEY,
+      mtime_ms    INTEGER NOT NULL,
+      size_bytes  INTEGER NOT NULL,
+      hash        TEXT NOT NULL,
+      indexed_at  TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS code_entities (
+      path        TEXT NOT NULL,
+      entity      TEXT NOT NULL,
+      PRIMARY KEY (path, entity),
+      FOREIGN KEY (path) REFERENCES code_files(path) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_code_entities_entity ON code_entities(entity);
   `);
   return db;
 }
@@ -635,7 +664,13 @@ export function getEntity(
 ): EntityCard {
   const name = normaliseEntity(rawName);
   if (!name) {
-    return { name: rawName, definition: null, references: [], neighbors: [] };
+    return {
+      name: rawName,
+      definition: null,
+      references: [],
+      neighbors: [],
+      codeLocations: [],
+    };
   }
   const limit = opts.limit ?? 12;
   const card: EntityCard = {
@@ -643,6 +678,7 @@ export function getEntity(
     definition: null,
     references: [],
     neighbors: [],
+    codeLocations: [],
   };
 
   const sources: Array<{ indexPath: string; scope: "project" | "global"; root: string | null }> =
@@ -702,7 +738,158 @@ export function getEntity(
     .slice(0, 12);
   card.references = card.references.slice(0, limit);
 
+  // Code-index lookup — only available on project scope.
+  if (projectRoot) {
+    const dbProject = openDb(projectIndexFile(projectRoot));
+    try {
+      const rows = dbProject
+        .prepare(
+          "SELECT path FROM code_entities WHERE entity = ? ORDER BY path LIMIT ?",
+        )
+        .all(name, Math.max(limit, 12)) as Array<{ path: string }>;
+      card.codeLocations = rows.map((r) => r.path);
+    } finally {
+      dbProject.close();
+    }
+  }
+
   return card;
+}
+
+// ---------- Code index ----------
+
+/**
+ * Replace every code_entities row for a single file. Idempotent.
+ * Pass `entities: []` (and any deletion via `applyCodeIndexDelete` instead) to
+ * remove a file from the index.
+ */
+export function applyCodeIndexUpsert(
+  projectRoot: string,
+  args: {
+    path: string;
+    mtimeMs: number;
+    sizeBytes: number;
+    hash: string;
+    entities: string[];
+  },
+): void {
+  if (!projectRoot) return;
+  const db = openDb(projectIndexFile(projectRoot));
+  try {
+    const tx = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO code_files(path, mtime_ms, size_bytes, hash, indexed_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET
+           mtime_ms = excluded.mtime_ms,
+           size_bytes = excluded.size_bytes,
+           hash = excluded.hash,
+           indexed_at = excluded.indexed_at`,
+      ).run(args.path, args.mtimeMs, args.sizeBytes, args.hash, new Date().toISOString());
+      db.prepare("DELETE FROM code_entities WHERE path = ?").run(args.path);
+      const ins = db.prepare(
+        "INSERT OR IGNORE INTO code_entities(path, entity) VALUES (?, ?)",
+      );
+      for (const e of args.entities) ins.run(args.path, e);
+    });
+    tx();
+  } finally {
+    db.close();
+  }
+}
+
+export function applyCodeIndexDelete(projectRoot: string, paths: string[]): void {
+  if (!projectRoot || !paths.length) return;
+  const db = openDb(projectIndexFile(projectRoot));
+  try {
+    const tx = db.transaction(() => {
+      const del = db.prepare("DELETE FROM code_files WHERE path = ?");
+      for (const p of paths) del.run(p);
+    });
+    tx();
+  } finally {
+    db.close();
+  }
+}
+
+export function getIndexedCodeFiles(
+  projectRoot: string,
+): Map<string, { hash: string; mtimeMs: number }> {
+  const out = new Map<string, { hash: string; mtimeMs: number }>();
+  if (!projectRoot) return out;
+  const indexPath = projectIndexFile(projectRoot);
+  if (!existsSync(indexPath)) return out;
+  const db = openDb(indexPath);
+  try {
+    const rows = db.prepare("SELECT path, hash, mtime_ms FROM code_files").all() as Array<{
+      path: string;
+      hash: string;
+      mtime_ms: number;
+    }>;
+    for (const r of rows) out.set(r.path, { hash: r.hash, mtimeMs: r.mtime_ms });
+  } finally {
+    db.close();
+  }
+  return out;
+}
+
+export function getCodeIndexStats(projectRoot: string): {
+  files: number;
+  entities: number;
+} {
+  if (!projectRoot) return { files: 0, entities: 0 };
+  const indexPath = projectIndexFile(projectRoot);
+  if (!existsSync(indexPath)) return { files: 0, entities: 0 };
+  const db = openDb(indexPath);
+  try {
+    const files = (db.prepare("SELECT COUNT(*) AS n FROM code_files").get() as { n: number }).n;
+    const entities = (db.prepare("SELECT COUNT(DISTINCT entity) AS n FROM code_entities").get() as {
+      n: number;
+    }).n;
+    return { files, entities };
+  } finally {
+    db.close();
+  }
+}
+
+/** Search the code index for files where any of the query tokens appear as entities. */
+export function recallCode(
+  projectRoot: string,
+  query: string,
+  limit = 12,
+): Array<{ path: string; matches: string[] }> {
+  if (!projectRoot) return [];
+  const indexPath = projectIndexFile(projectRoot);
+  if (!existsSync(indexPath)) return [];
+  const tokens = [
+    ...new Set(
+      query
+        .split(/\s+/)
+        .map((t) => normaliseEntity(t))
+        .filter(Boolean),
+    ),
+  ];
+  if (!tokens.length) return [];
+  const db = openDb(indexPath);
+  try {
+    const placeholders = tokens.map(() => "?").join(",");
+    const rows = db
+      .prepare(
+        `SELECT path, GROUP_CONCAT(entity, ',') AS matches, COUNT(*) AS hits
+         FROM code_entities
+         WHERE entity IN (${placeholders})
+         GROUP BY path
+         ORDER BY hits DESC, path
+         LIMIT ?`,
+      )
+      .all(...tokens, limit) as Array<{ path: string; matches: string }>;
+    return rows.map((r) => ({
+      path: r.path,
+      matches: r.matches.split(",").filter(Boolean),
+    }));
+  } finally {
+    db.close();
+  }
 }
 
 /**
