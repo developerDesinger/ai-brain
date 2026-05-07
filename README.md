@@ -1,15 +1,36 @@
 # ai-brain
 
-> A project-local AI knowledge brain that **learns from your codebase and your client's raw requirements** — and binds every coding agent that touches your project (Claude Code, Cursor, Codex CLI, Kiro, GitHub Copilot, Windsurf, Aider, …) to follow it.
+> **One brain. Every agent. Every project.**
+>
+> A project-local AI knowledge brain that learns from your code and binds every AI coding agent (Claude Code, Cursor, Copilot, Kiro, Codex CLI, Windsurf, Aider) to follow it. The brain travels with the project via git, so the rules persist across machines, contributors, and tools.
 
 [![CI](https://github.com/developerDesinger/ai-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/developerDesinger/ai-brain/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+## Why it matters
+
+- **Stop re-explaining your project.** New AI agent, new chat, new contributor — they all read the same brain and start from your project's truth, not generic best practices.
+- **Cross-vendor consistency.** Seven bridge files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, etc.) make every agent operate under the same contract: the **Iron Law** — every line of code must be traceable to the brain.
+- **Token-free auto-learning.** The watcher indexes your codebase continuously without ever calling an LLM, so "where does X live?" answers in milliseconds without burning API credits.
+- **LLM-powered for the hard parts.** When you have a vague client email or a 40-page spec, `brain learn` runs it through specialist sub-agents and persists structured findings as durable KB entries.
+- **Grows with your project.** The meta-agent `skill-forger` authors brand-new project-specific sub-agents when patterns recur — the brain literally learns new skills as you go.
+
+## Features
+
+- **Knowledge graph + FTS5 search** over a markdown KB committed to git (no opaque vector DB, no SaaS lock-in).
+- **AST-based code indexer** — tree-sitter for TypeScript, JavaScript, Python, Go, Rust, Java, Ruby (regex fallback for everything else).
+- **Continuous watcher** (`brain watch`) with debounced incremental updates, plus `brain service install` for launchd/systemd so it survives reboots.
+- **MCP server** with 12 tools (`brain_recall`, `brain_remember`, `brain_entity`, `brain_code_search`, `brain_invoke_subagent`, …) for any MCP-aware agent.
+- **Standalone runner** (`brain learn`, `brain run`) using Claude Opus 4.7 with adaptive thinking and `xhigh` effort by default.
+- **Five built-in sub-agents:** `requirement-refiner`, `style-learner`, `code-generator`, `knowledge-curator`, `skill-forger`.
+- **Project-local layout:** `.ai-brain/` carries kb + sub-agents per project; the engine ships once per machine.
+- **Compact + full retrieval modes** so agents pull bounded summaries first and full bodies only when needed.
 
 The brain lives at `<your-project>/.ai-brain/`. Knowledge entries are markdown files committed to git, so the brain travels with the project and grows alongside it. Every initialized project gets a set of bridge files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`, etc.) carrying a strict, mandatory operating contract — so any AI agent the project meets reads from the same source of truth.
 
 ---
 
-## What it does, in one paragraph
+## How it works, in one paragraph
 
 Run `brain watch` in your project once and the brain **continuously, automatically, and token-free** indexes every source file into a knowledge-graph of entities (functions, classes, identifiers, terms) — so any AI agent can ask "where does X live?" without grepping or burning tokens. Layered on top of that: `brain learn` takes raw input from you (project code, a client's vague email, a requirements doc) and runs it through the right specialist sub-agent (`style-learner` / `requirement-refiner`), persisting the durable findings as markdown KB entries inside `<project>/.ai-brain/kb/` with auto-extracted entities + 1-2 sentence summaries. Together they form a lightweight knowledge graph the agent can query cheaply. Next time any AI coding agent works on that project, it reads the brain first, obeys the rules it finds, and adds new findings of its own. As patterns recur, the meta-agent `skill-forger` authors brand-new project-specific sub-agents into `.ai-brain/subagents/` — the brain literally grows new skills as your project grows.
 
