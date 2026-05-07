@@ -1,0 +1,35 @@
+# Copilot project instructions — {{PROJECT_NAME}}
+
+⚠️ This project is governed by an **AI Brain** at `{{PROJECT_ROOT}}/.ai-brain/`. Copilot does not speak MCP, so this file is a **snapshot bridge**. It is binding for all code suggestions in this project. Refresh it with `brain sync {{PROJECT_ROOT}}` after meaningful KB updates.
+
+## The Iron Law
+
+Every line of code you suggest in this project must be traceable to the project's brain — to a knowledge entry under `.ai-brain/kb/` or to an explicit user statement. If a suggestion cannot be justified by the brain, do not produce it. Hard rule.
+
+## Hard rules for code suggestions
+
+1. **Recall before producing.** Read the brain entries under `.ai-brain/kb/*.md` (or the Project knowledge snapshot below) before suggesting any non-trivial code.
+2. **Match this project's existing style and architecture** rather than generic best practices. When unsure, prefer what neighboring files already do over what your training data thinks is best.
+3. **No undocumented deviations.** Do not introduce a new library, framework, or pattern that does not already appear in the codebase or in the brain. If a suggestion requires one, surface the deviation in a comment so the human can capture it as a `decision` entry.
+4. **Match this project's naming, error-handling, import style, and test conventions** by reading the closest existing example.
+5. **Don't fabricate.** When the brain is silent and no obvious example exists, ask in a comment rather than guessing.
+
+## How to refresh this file
+
+Authoritative knowledge lives at `{{PROJECT_ROOT}}/.ai-brain/`. To pull the latest into this file:
+
+```
+brain sync {{PROJECT_ROOT}}
+```
+
+For a richer prompt that includes every entry inline, run:
+
+```
+brain export {{PROJECT_ROOT}} >> .github/copilot-instructions.md
+```
+
+…and review/trim before committing.
+
+## Project knowledge snapshot
+
+(empty by default — populate via `brain export` above, or paste relevant entries from `.ai-brain/kb/`)

@@ -1,0 +1,28 @@
+# {{PROJECT_NAME}} — AI Brain operating contract (Aider)
+
+⚠️ This file is binding. Aider reads it via `read: CONVENTIONS.md` in `.aider.conf.yml` (or `--read CONVENTIONS.md`). Mirror of the project's AI Brain at `{{PROJECT_ROOT}}/.ai-brain/`.
+
+## The Iron Law
+
+Every line of code you produce or modify in this project must be traceable to the project's brain — to a knowledge entry under `.ai-brain/kb/` or to an explicit user statement. If your output cannot be justified by the brain, do not write it.
+
+## Hard rules
+
+1. **Read the brain first.** Before any non-trivial change, read `{{PROJECT_ROOT}}/.ai-brain/kb/*.md` (or the inline snapshot you've appended below) and obey requirement / style / pattern / decision entries.
+2. **Match this project's existing style and architecture** over generic conventions. When unsure, prefer what neighboring files do.
+3. **No undocumented deviations.** Do not introduce libraries, frameworks, or patterns absent from the codebase and the brain without first surfacing the deviation.
+4. **Match the closest existing file** for naming, error handling, imports, and test conventions.
+
+## Pull live knowledge from the brain
+
+Aider doesn't speak MCP. To inject the latest into Aider:
+
+```
+brain export {{PROJECT_ROOT}} > .ai-brain-snapshot.md
+```
+
+Then add `.ai-brain-snapshot.md` to `.aider.conf.yml` under `read:` (or pass `--read .ai-brain-snapshot.md`). Re-run after meaningful KB updates.
+
+## Project knowledge snapshot
+
+(empty — populate via `brain export` above)

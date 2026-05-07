@@ -1,0 +1,66 @@
+# {{PROJECT_NAME}} — AI Brain operating contract
+
+> ⚠️ **This file is binding.** This project carries an **AI Brain** at `.ai-brain/`. The contract below applies to every code change you make in this project, regardless of which AI agent or model you are. Do not skim it.
+
+- Project brain: `{{PROJECT_ROOT}}/.ai-brain/`
+- Brain engine: `{{BRAIN_HOME}}` (the CLI + MCP server live here; data lives with the project and travels via git)
+
+---
+
+## The Iron Law
+
+**Every line of code you produce or modify in this project must be traceable to the project's brain.** The brain is the single source of truth for what this project requires, how its code is styled, what decisions have been made, and what patterns to reuse.
+
+If your output cannot be justified by the brain — by an existing entry, by an entry you created via `brain_remember` in the same session, or by an explicit conversation with the user — **do not write it.**
+
+This is a hard rule, not a guideline.
+
+---
+
+## The Five Mandatory Steps
+
+You **must** perform these in order on every non-trivial task. "Non-trivial" means anything beyond a one-line typo fix.
+
+1. **RECALL before producing.** Before writing or modifying any code, call `brain_recall(<task in your own words>)`. Read every returned entry. Treat returned `requirement`, `style`, `pattern`, and `decision` entries as binding constraints on your output.
+
+2. **MATCH this project, not generic best practices.** When the brain's style or patterns disagree with what your training data calls "best practice," obey the brain. Generic best practices apply only when the brain is silent. If you find yourself reaching for a library, framework, or pattern that doesn't appear anywhere in the brain or the existing codebase, **stop** — you are about to violate the contract.
+
+3. **NO undocumented deviations.** If a task genuinely requires introducing something the brain has not endorsed, you must FIRST capture it as a `decision` via `brain_remember(type="decision", title="...", body="why this deviation is necessary, what it costs, what alternatives were considered")`. Only then write the code that depends on it. The decision entry is part of the work, not optional commentary.
+
+4. **CAPTURE what's worth keeping.** When a task surfaces a durable fact about this project — a real requirement the user just stated, a style rule the codebase actually follows, an architectural choice you just made — persist it via `brain_remember`. Do not over-record (no scratch notes, no "thinking out loud"); favor things future-you, or another agent, will be glad to recall. **Don't** record things already obvious from the code.
+
+5. **GROW skills when patterns recur.** If the same project-specific task comes up repeatedly and none of the built-in sub-agents (`requirement-refiner`, `style-learner`, `code-generator`, `knowledge-curator`) fits, run `brain_invoke_subagent("skill-forger", "<the recurring need>")`. The brain will author a project-specific sub-agent and install it under `.ai-brain/subagents/`. From that point on, the new sub-agent runs alongside the built-ins for this project.
+
+---
+
+## How to invoke the brain (Claude Code)
+
+The brain is exposed as MCP tools. If they are not visible, register the server (one-time, per machine):
+
+```
+claude mcp add ai-brain -s user -- node {{BRAIN_HOME}}/core/dist/mcp.js
+```
+
+Available MCP tools:
+
+- `brain_recall(query, projectPath?, limit?, includeGlobal?)`
+- `brain_remember(title, body, type, tags?, scope?, projectPath?)` — types: `requirement`, `style`, `pattern`, `decision`, `snippet`, `glossary`, `note`
+- `brain_project_summary(projectPath?)` — call this once at session start
+- `brain_invoke_subagent(name, input, projectPath?)` — names: `requirement-refiner`, `style-learner`, `code-generator`, `knowledge-curator`, `skill-forger`, plus any project sub-agents
+- `brain_list_subagents(projectPath?)`
+- `brain_sync_bridges(projectPath, force?)`
+- `brain_rebuild_index(projectPath?, scope?)`
+
+The brain auto-discovers `.ai-brain/` by walking up from your working directory, so you usually don't need to pass `projectPath`.
+
+## Session-start ritual
+
+Whenever you open this project, before doing anything else:
+
+1. Call `brain_project_summary` once. Read every entry.
+2. If the user gave you a task, call `brain_recall(<task>)`.
+3. Then proceed with the Five Mandatory Steps for the task at hand.
+
+## Fallback if MCP is unavailable
+
+The same data lives in `.ai-brain/kb/*.md` (one markdown file per entry) and `.ai-brain/subagents/*.md`. Read those directly. The Iron Law and Five Mandatory Steps still apply.

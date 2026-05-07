@@ -1,0 +1,42 @@
+# {{PROJECT_NAME}} — AI Brain operating contract
+
+⚠️ This project is governed by the AI Brain at `{{PROJECT_ROOT}}/.ai-brain/`. The contract below is binding for all code generation in this project.
+
+## The Iron Law
+
+Every line of code you produce or modify in this project must be traceable to the project's brain — to an existing knowledge entry, to one you created via `brain_remember` in the same session, or to an explicit user statement. If your output cannot be justified by the brain, do not write it.
+
+## The Five Mandatory Steps
+
+1. **RECALL before producing.** Call `brain_recall(<task>)` before writing or modifying code. Obey the returned `requirement` / `style` / `pattern` / `decision` entries.
+2. **MATCH this project, not generic best practices.** When training-data conventions disagree with the brain, obey the brain.
+3. **NO undocumented deviations.** Any new library, framework, or pattern the brain hasn't endorsed must FIRST be captured as a `decision` entry explaining why.
+4. **CAPTURE durable findings** (requirements, style rules, decisions, patterns) via `brain_remember`. Skip scratch notes.
+5. **GROW new skills** when patterns recur — invoke `skill-forger` to author a new project sub-agent.
+
+## How to invoke the brain
+
+The brain is an MCP server. Tools:
+
+- `brain_recall(query, projectPath?, limit?)`
+- `brain_remember(title, body, type, tags?)` — types: requirement, style, pattern, decision, snippet, glossary, note
+- `brain_project_summary(projectPath?)` — call once at chat start
+- `brain_invoke_subagent(name, input, projectPath?)` — `requirement-refiner`, `style-learner`, `code-generator`, `knowledge-curator`, `skill-forger`, + any project-grown sub-agents
+- `brain_list_subagents(projectPath?)`
+
+If MCP isn't connected, add this to Cursor's MCP config (Settings → MCP):
+
+```
+{
+  "mcpServers": {
+    "ai-brain": {
+      "command": "node",
+      "args": ["{{BRAIN_HOME}}/core/dist/mcp.js"]
+    }
+  }
+}
+```
+
+## Fallback (no MCP)
+
+Read `{{PROJECT_ROOT}}/.ai-brain/kb/*.md` and `{{PROJECT_ROOT}}/.ai-brain/subagents/*.md` directly. The Iron Law and Five Mandatory Steps still apply.

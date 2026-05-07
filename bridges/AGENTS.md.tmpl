@@ -1,0 +1,73 @@
+# {{PROJECT_NAME}} — AI Brain operating contract (AGENTS.md)
+
+> ⚠️ **This file is binding.** This project carries an **AI Brain** at `.ai-brain/`. The contract below applies to every code change you make, regardless of which AI agent or model you are. Do not skim it.
+
+This is the cross-vendor `AGENTS.md` standard — read by OpenAI Codex CLI and adopted by other agents. Tool-specific equivalents (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `CONVENTIONS.md`, etc.) duplicate this guidance per tool.
+
+- Project brain: `{{PROJECT_ROOT}}/.ai-brain/`
+- Brain engine: `{{BRAIN_HOME}}` (CLI + MCP server)
+
+---
+
+## The Iron Law
+
+**Every line of code you produce or modify in this project must be traceable to the project's brain.** The brain is the single source of truth for what this project requires, how it is styled, what decisions have been made, and what patterns to reuse.
+
+If your output cannot be justified by the brain — by an existing entry, by one you created in the same session, or by an explicit user statement — **do not write it.** Hard rule.
+
+---
+
+## The Five Mandatory Steps
+
+Perform these in order on every non-trivial task ("non-trivial" = anything beyond a one-line typo fix).
+
+1. **RECALL before producing.** Before writing or modifying any code, search the brain for prior knowledge about the task and obey returned constraints.
+2. **MATCH this project, not generic best practices.** When training-data conventions disagree with the brain, obey the brain.
+3. **NO undocumented deviations.** Any new library, framework, or pattern the brain hasn't endorsed must FIRST be captured as a `decision` entry explaining why.
+4. **CAPTURE what's worth keeping.** Persist durable findings (requirements, style rules, decisions, patterns). Don't record scratch notes.
+5. **GROW skills when patterns recur.** If the same project-specific task keeps coming up, ask the `skill-forger` sub-agent to author a new sub-agent for it.
+
+---
+
+## How to invoke the brain
+
+**If you speak MCP** (Claude Code, Cursor, Kiro, etc.), use these tools:
+
+- `brain_recall(query)` — search the project + global KB
+- `brain_remember(title, body, type, tags?)` — types: `requirement`, `style`, `pattern`, `decision`, `snippet`, `glossary`, `note`
+- `brain_project_summary()` — session-start: load full project KB
+- `brain_invoke_subagent(name, input)` — built-in: `requirement-refiner`, `style-learner`, `code-generator`, `knowledge-curator`, `skill-forger`. Plus any project-grown sub-agents.
+- `brain_list_subagents()`
+
+**If you don't speak MCP** (Codex CLI, ChatGPT, raw HTTP, anything else), use the `brain` CLI:
+
+```
+brain show {{PROJECT_ROOT}}                              # full project KB
+brain recall "<query>" --path {{PROJECT_ROOT}}           # search
+brain run <subagent> "<input>" --path {{PROJECT_ROOT}}   # run a sub-agent (needs ANTHROPIC_API_KEY)
+brain export {{PROJECT_ROOT}}                            # dump entire KB as markdown
+```
+
+Or read directly from disk:
+
+- Knowledge: `{{PROJECT_ROOT}}/.ai-brain/kb/*.md` (one markdown file per entry, with frontmatter)
+- Sub-agents: `{{PROJECT_ROOT}}/.ai-brain/subagents/*.md`
+
+## Session-start ritual
+
+1. Call `brain_project_summary` (or `brain show`). Read every entry.
+2. For the user's task, call `brain_recall(<task>)`.
+3. Proceed with the Five Mandatory Steps.
+
+## MCP wiring (one-time, per machine)
+
+| Agent          | Setup |
+|----------------|-------|
+| Claude Code    | `claude mcp add ai-brain -s user -- node {{BRAIN_HOME}}/core/dist/mcp.js` |
+| Cursor         | Settings → MCP → add `ai-brain`, command `node`, args `["{{BRAIN_HOME}}/core/dist/mcp.js"]` |
+| Kiro           | `.kiro/settings/mcp.json` → add `ai-brain` server with the same command |
+| Codex CLI      | Reads this `AGENTS.md` automatically. No MCP wiring. |
+| Copilot        | Reads `.github/copilot-instructions.md` (synced by `brain sync`). |
+| Windsurf       | Reads `.windsurfrules` (synced by `brain sync`). |
+| Aider          | Add `read: CONVENTIONS.md` to `.aider.conf.yml`. |
+| Anything else  | `brain export {{PROJECT_ROOT}} > snapshot.md` and paste it into the tool. |

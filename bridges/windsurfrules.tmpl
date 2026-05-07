@@ -1,0 +1,29 @@
+# {{PROJECT_NAME}} — AI Brain operating contract
+
+⚠️ This project is governed by an **AI Brain** at `{{PROJECT_ROOT}}/.ai-brain/`. The contract below is binding for every code change in this project.
+
+## The Iron Law
+
+Every line of code you produce or modify in this project must be traceable to the project's brain — to a knowledge entry under `.ai-brain/kb/` or to an explicit user statement. If your output cannot be justified by the brain, do not write it.
+
+## Hard rules
+
+1. **Read the brain first.** Before any non-trivial change, read `{{PROJECT_ROOT}}/.ai-brain/kb/*.md` (or the snapshot below) and obey the requirement/style/pattern/decision entries.
+2. **Match this project, not generic best practices.** When training-data conventions disagree with the brain, obey the brain.
+3. **No undocumented deviations.** Do not introduce a library, framework, or pattern that doesn't already appear in the codebase or in the brain without surfacing the deviation as a comment.
+4. **Match the closest existing file** for naming, error handling, imports, and test style.
+
+## Refresh this file
+
+Windsurf does not speak MCP, so for the latest KB:
+
+```
+brain sync {{PROJECT_ROOT}}                          # rewrites this file
+brain export {{PROJECT_ROOT}} >> .windsurfrules      # appends a full inline snapshot
+```
+
+Re-run after meaningful KB updates.
+
+## Project knowledge snapshot
+
+(empty — populate via `brain export` above)

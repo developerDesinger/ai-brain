@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        working-directory: core
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        working-directory: core
+        run: npm run build
+
+      - name: CLI smoke test
+        run: |
+          node core/dist/cli.js version
+          node core/dist/cli.js status
+          node core/dist/cli.js agents --global-only
+
+      - name: MCP handshake smoke test
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | node core/dist/mcp.js \
+            | tee /tmp/mcp.out
+          grep -q '"name":"brain_recall"' /tmp/mcp.out
+          grep -q '"name":"brain_remember"' /tmp/mcp.out
+          grep -q '"name":"brain_invoke_subagent"' /tmp/mcp.out
+
+      - name: brain init round-trip
+        run: |
+          mkdir -p /tmp/sample-project
+          node core/dist/cli.js init /tmp/sample-project
+          test -d /tmp/sample-project/.ai-brain/kb
+          test -d /tmp/sample-project/.ai-brain/subagents
+          test -f /tmp/sample-project/.ai-brain/config.json
+          test -f /tmp/sample-project/.ai-brain/.gitignore
+          test -f /tmp/sample-project/CLAUDE.md
+          test -f /tmp/sample-project/AGENTS.md
+          test -f /tmp/sample-project/.cursorrules
+          node core/dist/cli.js remember --title "API style" --body "Routes return JSON" --type style --path /tmp/sample-project
+          node core/dist/cli.js recall json --path /tmp/sample-project | grep -q "API style"

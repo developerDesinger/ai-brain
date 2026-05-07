@@ -1,0 +1,44 @@
+---
+inclusion: always
+---
+
+# {{PROJECT_NAME}} — AI Brain operating contract
+
+⚠️ This project is governed by the AI Brain at `{{PROJECT_ROOT}}/.ai-brain/`. The contract below is binding for every code change in this project.
+
+## The Iron Law
+
+Every line of code you produce or modify in this project must be traceable to the project's brain — to an existing knowledge entry, to one you created via `brain_remember` in the same session, or to an explicit user statement. If your output cannot be justified by the brain, do not write it.
+
+## The Five Mandatory Steps
+
+1. **RECALL before producing.** Call `brain_recall(<task>)`. Obey returned constraints.
+2. **MATCH this project, not generic best practices.**
+3. **NO undocumented deviations.** Capture them as `decision` entries first.
+4. **CAPTURE durable findings** via `brain_remember`.
+5. **GROW skills when patterns recur** — invoke `skill-forger`.
+
+## MCP tools
+
+- `brain_recall(query, projectPath?, limit?)`
+- `brain_remember(title, body, type, tags?)`
+- `brain_project_summary(projectPath?)` — call at session start
+- `brain_invoke_subagent(name, input, projectPath?)` — built-in: `requirement-refiner`, `style-learner`, `code-generator`, `knowledge-curator`, `skill-forger`, + project-grown sub-agents
+- `brain_list_subagents(projectPath?)`
+
+If the MCP server isn't connected, add to `.kiro/settings/mcp.json`:
+
+```
+{
+  "mcpServers": {
+    "ai-brain": {
+      "command": "node",
+      "args": ["{{BRAIN_HOME}}/core/dist/mcp.js"]
+    }
+  }
+}
+```
+
+## Fallback (no MCP)
+
+Read `{{PROJECT_ROOT}}/.ai-brain/kb/*.md` and `{{PROJECT_ROOT}}/.ai-brain/subagents/*.md` directly. The Iron Law still applies.
