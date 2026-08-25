@@ -46,9 +46,9 @@
     "../LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js dist/mcp.js",
-    "dev:mcp": "tsx src/mcp.ts",
-    "dev:cli": "tsx src/cli.ts",
+    "build": "node init && tsc -p tsconfig.json && chmod +x dist/cli.js dist/mcp.js",
+    "dev:mcp": "node init && tsx src/mcp.ts",
+    "dev:cli": "node init && tsx src/cli.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
